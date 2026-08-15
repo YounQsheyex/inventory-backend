@@ -1,7 +1,7 @@
-const express = require('express');
-const Sale = require('../models/Sale');
-const Product = require('../models/Product');
-const { protect, authorize } = require('../middleware/auth');
+const express = require("express");
+const Sale = require("../models/Sale");
+const Product = require("../models/Product");
+const { protect, authorize } = require("../middleware/auth");
 
 const router = express.Router();
 router.use(protect);
@@ -9,13 +9,21 @@ router.use(protect);
 const generateInvoice = async () => {
   const count = await Sale.countDocuments();
   const d = new Date();
-  return `INV-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}-${String(count + 1).padStart(5, '0')}`;
+  return `INV-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}-${String(count + 1).padStart(5, "0")}`;
 };
 
 // GET /api/sales
-router.get('/', async (req, res) => {
+router.get("/", async (req, res) => {
   try {
-    const { startDate, endDate, status, paymentMethod, search, page = 1, limit = 20 } = req.query;
+    const {
+      startDate,
+      endDate,
+      status,
+      paymentMethod,
+      search,
+      page = 1,
+      limit = 20,
+    } = req.query;
     const query = {};
 
     if (startDate || endDate) {
@@ -29,40 +37,58 @@ router.get('/', async (req, res) => {
     }
     if (status) query.status = status;
     if (paymentMethod) query.paymentMethod = paymentMethod;
-    if (search) query.invoiceNumber = { $regex: search, $options: 'i' };
+    if (search) query.invoiceNumber = { $regex: search, $options: "i" };
 
     const total = await Sale.countDocuments(query);
     const sales = await Sale.find(query)
-      .populate('soldBy', 'name')
-      .sort('-saleDate')
+      .populate("soldBy", "name email role")
+      .sort("-saleDate")
       .skip((+page - 1) * +limit)
       .limit(+limit);
 
     const statsAgg = await Sale.aggregate([
-      { $match: { ...query, status: 'completed' } },
+      { $match: { ...query, status: "completed" } },
       {
         $group: {
           _id: null,
-          totalRevenue: { $sum: '$total' },
-          totalCost: { $sum: '$totalCost' },
-          totalProfit: { $sum: '$grossProfit' },
+          totalRevenue: { $sum: "$total" },
+          totalCost: { $sum: "$totalCost" },
+          totalProfit: { $sum: "$grossProfit" },
           count: { $sum: 1 },
         },
       },
     ]);
-    const stats = statsAgg[0] || { totalRevenue: 0, totalCost: 0, totalProfit: 0, count: 0 };
+    const stats = statsAgg[0] || {
+      totalRevenue: 0,
+      totalCost: 0,
+      totalProfit: 0,
+      count: 0,
+    };
 
-    res.json({ success: true, sales, total, page: +page, pages: Math.ceil(total / +limit), stats });
+    res.json({
+      success: true,
+      sales,
+      total,
+      page: +page,
+      pages: Math.ceil(total / +limit),
+      stats,
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
 // GET /api/sales/:id
-router.get('/:id', async (req, res) => {
+router.get("/:id", async (req, res) => {
   try {
-    const sale = await Sale.findById(req.params.id).populate('soldBy', 'name email');
-    if (!sale) return res.status(404).json({ success: false, message: 'Sale not found.' });
+    const sale = await Sale.findById(req.params.id).populate(
+      "soldBy",
+      "name email",
+    );
+    if (!sale)
+      return res
+        .status(404)
+        .json({ success: false, message: "Sale not found." });
     res.json({ success: true, sale });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -70,9 +96,17 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/sales
-router.post('/', async (req, res) => {
+router.post("/", async (req, res) => {
   try {
-    const { customer, items, discount = 0, taxRate = 0, paymentMethod, paymentStatus, notes } = req.body;
+    const {
+      customer,
+      items,
+      discount = 0,
+      taxRate = 0,
+      paymentMethod,
+      paymentStatus,
+      notes,
+    } = req.body;
 
     const processedItems = [];
     let subtotal = 0;
@@ -81,9 +115,12 @@ router.post('/', async (req, res) => {
     for (const item of items) {
       const product = await Product.findById(item.productId);
       if (!product) throw new Error(`Product not found: ${item.productId}`);
-      if (!product.isActive) throw new Error(`Product "${product.name}" is inactive.`);
+      if (!product.isActive)
+        throw new Error(`Product "${product.name}" is inactive.`);
       if (product.quantity < item.quantity)
-        throw new Error(`Insufficient stock for "${product.name}". Available: ${product.quantity}`);
+        throw new Error(
+          `Insufficient stock for "${product.name}". Available: ${product.quantity}`,
+        );
 
       const itemDiscount = item.discount || 0;
       const lineTotal = product.sellingPrice * item.quantity - itemDiscount;
@@ -103,7 +140,12 @@ router.post('/', async (req, res) => {
 
       product.quantity -= item.quantity;
       product.totalSold += item.quantity;
-      product.stockHistory.push({ type: 'sale', quantity: -item.quantity, note: 'Sale', performedBy: req.user._id });
+      product.stockHistory.push({
+        type: "sale",
+        quantity: -item.quantity,
+        note: "Sale",
+        performedBy: req.user._id,
+      });
       await product.save();
     }
 
@@ -128,7 +170,7 @@ router.post('/', async (req, res) => {
       soldBy: req.user._id,
     });
 
-    await sale.populate('soldBy', 'name');
+    await sale.populate("soldBy", "name email role");
     res.status(201).json({ success: true, sale });
   } catch (err) {
     res.status(400).json({ success: false, message: err.message });
@@ -136,23 +178,39 @@ router.post('/', async (req, res) => {
 });
 
 // PUT /api/sales/:id/cancel
-router.put('/:id/cancel', authorize('admin', 'manager'), async (req, res) => {
+router.put("/:id/cancel", authorize("admin", "manager"), async (req, res) => {
   try {
     const sale = await Sale.findById(req.params.id);
-    if (!sale) return res.status(404).json({ success: false, message: 'Sale not found.' });
-    if (sale.status === 'cancelled')
-      return res.status(400).json({ success: false, message: 'Sale already cancelled.' });
+    if (!sale)
+      return res
+        .status(404)
+        .json({ success: false, message: "Sale not found." });
+    if (sale.status === "cancelled")
+      return res
+        .status(400)
+        .json({ success: false, message: "Sale already cancelled." });
 
     for (const item of sale.items) {
       await Product.findByIdAndUpdate(item.product, {
         $inc: { quantity: item.quantity, totalSold: -item.quantity },
-        $push: { stockHistory: { type: 'return', quantity: item.quantity, note: `Cancelled: ${sale.invoiceNumber}`, performedBy: req.user._id } },
+        $push: {
+          stockHistory: {
+            type: "return",
+            quantity: item.quantity,
+            note: `Cancelled: ${sale.invoiceNumber}`,
+            performedBy: req.user._id,
+          },
+        },
       });
     }
 
-    sale.status = 'cancelled';
+    sale.status = "cancelled";
     await sale.save();
-    res.json({ success: true, sale, message: 'Sale cancelled. Stock restored.' });
+    res.json({
+      success: true,
+      sale,
+      message: "Sale cancelled. Stock restored.",
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

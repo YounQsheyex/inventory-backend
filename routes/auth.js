@@ -100,4 +100,54 @@ router.put('/users/:id', protect, authorize('admin'), async (req, res) => {
   }
 });
 
+// DELETE /api/auth/users/:id  (admin only — soft delete)
+router.delete('/users/:id', protect, authorize('admin'), async (req, res) => {
+  try {
+    // Prevent admin from deleting themselves
+    if (req.params.id === req.user._id.toString()) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'You cannot delete your own account.' 
+      });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      { isActive: false },
+      { new: true }
+    );
+
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found.' 
+      });
+    }
+
+    res.json({ 
+      success: true, 
+      message: `${user.name} has been deactivated successfully.` 
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// DELETE /api/auth/users/:id/permanent  (admin only — hard delete)
+router.delete('/users/:id/permanent', protect, authorize('admin'), async (req, res) => {
+  try {
+    if (req.params.id === req.user._id.toString()) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'You cannot delete your own account.' 
+      });
+    }
+
+    await User.findByIdAndDelete(req.params.id);
+    res.json({ success: true, message: 'User permanently deleted.' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 module.exports = router;
